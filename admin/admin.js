@@ -1,0 +1,1240 @@
+/**
+ * Painel de Admin - Multi-tenant com Supabase Auth
+ */
+
+let currentAction = null;
+let allLicensesCache = [];
+let currentUser = null;
+let extensionFilename = 'LOVABLE_INFINITY.zip'; // nome padrão, atualizado via version.json
+
+const EXPIRING_DAYS = 30;
+const SORT_NAME_KEY = 'lovable_admin_sort_by_name';
+let sortByNameActive = false;
+
+/**
+ * Verifica se a licença está expirando em breve (próximos 30 dias).
+ * Usa comparação em timestamp (milissegundos desde epoch) para consistência.
+ */
+function isExpiringSoon(license) {
+    if (!license.active || license.lifetime) return false;
+    const nowMs = Date.now();
+    const expiryMs = Date.parse(license.expiryDate);
+    if (isNaN(expiryMs)) return false;
+    if (nowMs > expiryMs) return false;
+    const limitMs = nowMs + (EXPIRING_DAYS * 24 * 60 * 60 * 1000);
+    return expiryMs <= limitMs;
+}
+
+/**
+ * Verifica se a licença está expirada.
+ * Usa comparação em timestamp para evitar problemas de timezone.
+ */
+function isExpired(license) {
+    if (license.lifetime) return false;
+    const expiryMs = Date.parse(license.expiryDate);
+    if (isNaN(expiryMs)) return false;
+    return Date.now() > expiryMs;
+}
+
+function getCurrentUser() {
+    return currentUser;
+}
+
+function isMasterUser() {
+    if (!currentUser) return false;
+    return currentUser.role !== 'semi_admin';
+}
+
+document.addEventListener('DOMContentLoaded', async () => {
+    await initializeAuth();
+    await licenseManager.init();
+
+    const lifetimeCheckbox = document.getElementById('create-license-lifetime');
+    const expiryDaysGroup = document.getElementById('create-expiry-days-group');
+    if (lifetimeCheckbox && expiryDaysGroup) {
+        const toggle = () => { expiryDaysGroup.style.display = lifetimeCheckbox.checked ? 'none' : 'block'; };
+        toggle();
+        lifetimeCheckbox.addEventListener('change', toggle);
+    }
+
+    const editLifetimeCheck = document.getElementById('edit-lifetime');
+    const editExpiryGroup = document.getElementById('edit-expiry-group');
+    if (editLifetimeCheck && editExpiryGroup) {
+        const toggleEdit = () => { editExpiryGroup.style.display = editLifetimeCheck.checked ? 'none' : 'block'; };
+        toggleEdit();
+        editLifetimeCheck.addEventListener('change', toggleEdit);
+    }
+
+    const auth = getAuth();
+    if (!auth) {
+        document.getElementById('login-screen').classList.remove('hidden');
+        document.getElementById('login-error').textContent = 'Erro ao inicializar autenticação. Verifique a configuração.';
+        document.getElementById('login-error').classList.add('show');
+        return;
+    }
+
+    auth.onAuthStateChanged(function (user) {
+        currentUser = user;
+        if (user) {
+            document.getElementById('login-screen').classList.add('hidden');
+            document.getElementById('admin-panel-wrap').classList.add('visible');
+            applyMasterUI();
+            initializePanel();
+        } else {
+            document.getElementById('login-screen').classList.remove('hidden');
+            document.getElementById('admin-panel-wrap').classList.remove('visible');
+        }
+    });
+
+    document.getElementById('login-form')?.addEventListener('submit', async function (e) {
+        e.preventDefault();
+        const email = document.getElementById('login-email')?.value?.trim() || '';
+        const password = document.getElementById('login-password')?.value || '';
+        const errEl = document.getElementById('login-error');
+        const btn = document.getElementById('btn-login-submit');
+        if (!email || !password) {
+            errEl.textContent = 'Preencha e-mail e senha.';
+            errEl.classList.add('show');
+            return;
+        }
+        errEl.classList.remove('show');
+        if (btn) { btn.disabled = true; btn.textContent = 'Entrando...'; }
+        try {
+            await auth.signInWithEmailAndPassword(email, password);
+            errEl.classList.remove('show');
+        } catch (err) {
+            var msg = (err && err.message) ? String(err.message) : '';
+            errEl.textContent = msg || 'Falha no login. Verifique e-mail e senha.';
+            errEl.classList.add('show');
+        }
+        if (btn) { btn.disabled = false; btn.textContent = 'Entrar'; }
+    });
+
+    document.getElementById('btn-logout')?.addEventListener('click', function () {
+        auth.signOut();
+    });
+
+    document.querySelectorAll('.admin-tabs .tab').forEach(function (tab) {
+        tab.addEventListener('click', function () {
+            if (tab.classList.contains('hidden')) return;
+            const t = tab.getAttribute('data-tab');
+            document.querySelectorAll('.admin-tabs .tab').forEach(function (x) { x.classList.remove('active'); });
+            tab.classList.add('active');
+            document.getElementById('main-licenses').style.display = t === 'licenses' ? 'block' : 'none';
+            document.getElementById('main-admin').style.display = t === 'admin' ? 'block' : 'none';
+            document.getElementById('main-admin').setAttribute('aria-hidden', t !== 'admin');
+            // Carregar usuários do painel quando abrir a aba
+            if (t === 'admin' && typeof loadPanelUsers === 'function') {
+                loadPanelUsers();
+            }
+        });
+    });
+});
+
+function applyMasterUI() {
+    var isMaster = typeof isMasterUser === 'function' ? isMasterUser() : false;
+    var tabAdmin = document.getElementById('tab-admin');
+    if (tabAdmin) tabAdmin.classList.toggle('hidden', !isMaster);
+
+    // Semi-admin: acesso restrito a "Criar licença". Sem visão de lista, stats,
+    // import/export, geração de chaves de teste ou gestão de acessos do painel.
+    var statsGrid = document.getElementById('stats-grid');
+    var tableSection = document.getElementById('licenses-table-section');
+    var importExportSection = document.getElementById('import-export-section');
+    var testKeysBtn = document.getElementById('btn-open-test-keys-modal');
+    var semiAdminBanner = document.getElementById('semi-admin-banner');
+
+    if (statsGrid) statsGrid.classList.toggle('hidden', !isMaster);
+    if (tableSection) tableSection.classList.toggle('hidden', !isMaster);
+    if (importExportSection) importExportSection.classList.toggle('hidden', !isMaster);
+    if (testKeysBtn) testKeysBtn.classList.toggle('hidden', !isMaster);
+    if (semiAdminBanner) semiAdminBanner.classList.toggle('hidden', isMaster);
+}
+
+function initializePanel() {
+    setupEventListeners();
+    loadMain();
+    checkExtensionRelease();
+}
+
+function setupEventListeners() {
+    document.getElementById('btn-open-create-modal')?.addEventListener('click', openCreateModal);
+    document.getElementById('modal-create-close')?.addEventListener('click', closeCreateModal);
+    document.getElementById('btn-create-cancel')?.addEventListener('click', closeCreateModal);
+    document.getElementById('btn-create-submit')?.addEventListener('click', submitCreateLicense);
+    document.getElementById('btn-create-copy')?.addEventListener('click', copyCreatedLicense);
+
+    document.getElementById('btn-open-test-keys-modal')?.addEventListener('click', openTestKeysModal);
+    document.getElementById('modal-test-keys-close')?.addEventListener('click', closeTestKeysModal);
+    document.getElementById('btn-test-keys-cancel')?.addEventListener('click', closeTestKeysModal);
+    document.getElementById('btn-test-keys-generate')?.addEventListener('click', submitTestKeys);
+    document.getElementById('test-keys-list')?.addEventListener('click', (e) => {
+        const copyBtn = e.target.closest('.test-key-copy');
+        if (!copyBtn) return;
+        const row = copyBtn.closest('.test-key-row');
+        const key = row?.querySelector('.test-key-value')?.value?.trim();
+        if (!key) return;
+        navigator.clipboard.writeText(key).then(() => {
+            const feedback = row?.querySelector('.test-key-feedback');
+            if (feedback) {
+                feedback.textContent = 'Chave copiada';
+                feedback.classList.add('show');
+                setTimeout(() => { feedback.classList.remove('show'); }, 2000);
+            }
+        }).catch(() => showAlert('Erro ao copiar.', 'error'));
+    });
+    document.getElementById('modal-test-keys')?.addEventListener('click', (e) => { if (e.target.id === 'modal-test-keys') closeTestKeysModal(); });
+
+    document.getElementById('modal-edit-close')?.addEventListener('click', closeEditModal);
+    document.getElementById('btn-edit-cancel')?.addEventListener('click', closeEditModal);
+    document.getElementById('btn-edit-submit')?.addEventListener('click', submitEditLicense);
+
+    document.getElementById('confirm-modal')?.addEventListener('click', (e) => { if (e.target.id === 'confirm-modal') closeModal(); });
+    document.getElementById('modal-close')?.addEventListener('click', closeModal);
+    document.getElementById('btn-confirm')?.addEventListener('click', confirmAction);
+    document.getElementById('btn-cancel')?.addEventListener('click', closeModal);
+
+    document.getElementById('btn-export')?.addEventListener('click', exportLicenses);
+    document.getElementById('btn-copy-export')?.addEventListener('click', copyExport);
+    document.getElementById('btn-import')?.addEventListener('click', importLicenses);
+
+    // Ordenação por nome (toggle com persistência)
+    const btnSortName = document.getElementById('btn-sort-name');
+    if (btnSortName) {
+        // Restaurar estado salvo
+        try {
+            sortByNameActive = localStorage.getItem(SORT_NAME_KEY) === '1';
+        } catch (e) {}
+        updateSortButton(btnSortName);
+
+        btnSortName.addEventListener('click', () => {
+            sortByNameActive = !sortByNameActive;
+            try { localStorage.setItem(SORT_NAME_KEY, sortByNameActive ? '1' : '0'); } catch (e) {}
+            updateSortButton(btnSortName);
+            const searchInput = document.getElementById('search-licenses');
+            filterAndRenderLicenses(searchInput ? searchInput.value : '');
+        });
+    }
+
+    // Pesquisa de licenças
+    const searchInput = document.getElementById('search-licenses');
+    const btnClearSearch = document.getElementById('btn-clear-search');
+    if (searchInput) {
+        searchInput.addEventListener('input', () => {
+            filterAndRenderLicenses(searchInput.value);
+        });
+        searchInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                searchInput.value = '';
+                filterAndRenderLicenses('');
+            }
+        });
+    }
+    if (btnClearSearch) {
+        btnClearSearch.addEventListener('click', () => {
+            if (searchInput) searchInput.value = '';
+            filterAndRenderLicenses('');
+        });
+    }
+    document.getElementById('btn-toggle-import-export')?.addEventListener('click', () => {
+        const body = document.getElementById('import-export-body');
+        const btn = document.getElementById('btn-toggle-import-export');
+        if (body && btn) {
+            body.classList.toggle('show');
+            btn.setAttribute('aria-expanded', body.classList.contains('show'));
+        }
+    });
+
+    document.getElementById('btn-create-panel-user')?.addEventListener('click', createPanelUserSubmit);
+
+    document.getElementById('modal-extension-release-close')?.addEventListener('click', closeExtensionReleaseModal);
+    document.getElementById('modal-extension-release-dismiss')?.addEventListener('click', closeExtensionReleaseModal);
+    document.getElementById('modal-extension-release-download')?.addEventListener('click', function () { window.location.href = '/downloads/' + extensionFilename; });
+    document.getElementById('btn-download-extension')?.addEventListener('click', function () {
+        window.location.href = '/downloads/' + extensionFilename;
+    });
+
+    // Usuários do painel
+    document.getElementById('btn-refresh-panel-users')?.addEventListener('click', loadPanelUsers);
+    document.getElementById('btn-cleanup-orphaned-licenses')?.addEventListener('click', cleanupOrphanedLicenses);
+    document.getElementById('modal-edit-panel-user-close')?.addEventListener('click', closeEditPanelUserModal);
+    document.getElementById('btn-edit-panel-user-cancel')?.addEventListener('click', closeEditPanelUserModal);
+    document.getElementById('btn-edit-panel-user-submit')?.addEventListener('click', submitEditPanelUser);
+    document.getElementById('edit-panel-user-lifetime')?.addEventListener('change', function () {
+        const group = document.getElementById('edit-panel-user-valid-until-group');
+        if (group) group.style.display = this.checked ? 'none' : 'block';
+    });
+
+    // Toggle de senha (olhinho) — funciona para todos os botões .toggle-password
+    document.querySelectorAll('.toggle-password').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            var targetId = btn.getAttribute('data-target');
+            var input = document.getElementById(targetId);
+            if (!input) return;
+            if (input.type === 'password') {
+                input.type = 'text';
+                btn.classList.add('active');
+                btn.textContent = '🙈';
+            } else {
+                input.type = 'password';
+                btn.classList.remove('active');
+                btn.textContent = '👁';
+            }
+        });
+    });
+}
+
+const RELEASE_STORAGE_KEY = 'lovable_lastSeenReleaseVersion';
+
+function formatReleaseDate(publishedAt) {
+    if (publishedAt == null) return '—';
+    try {
+        var d;
+        if (typeof publishedAt === 'number') {
+            d = new Date(publishedAt);
+        } else if (typeof publishedAt === 'string') {
+            // Tentar como ISO string primeiro (ex: "2026-02-12T16:33:05.338Z")
+            d = new Date(publishedAt);
+            // Se falhou como ISO, tentar como timestamp numérico
+            if (isNaN(d.getTime())) {
+                d = new Date(parseInt(publishedAt, 10));
+            }
+        } else {
+            return '—';
+        }
+        if (isNaN(d.getTime())) return '—';
+        return d.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+    } catch (e) { return '—'; }
+}
+
+function loadReleaseIntoBar(release) {
+    var versionEl = document.getElementById('extension-version');
+    var dateEl = document.getElementById('extension-updated-at');
+    if (versionEl) versionEl.textContent = (release && release.version != null) ? String(release.version) : '—';
+    if (dateEl) dateEl.textContent = (release && release.publishedAt != null) ? formatReleaseDate(release.publishedAt) : '—';
+    // Atualiza o nome do arquivo para download
+    if (release && release.filename) {
+        extensionFilename = release.filename;
+    }
+}
+
+function getReleaseModalEl() {
+    return document.getElementById('modal-extension-release');
+}
+
+function closeExtensionReleaseModal() {
+    var modal = getReleaseModalEl();
+    if (modal) modal.classList.remove('show');
+    if (window._lastExtensionReleaseKey) {
+        try { localStorage.setItem(RELEASE_STORAGE_KEY, window._lastExtensionReleaseKey); } catch (e) {}
+    }
+}
+
+async function checkExtensionRelease() {
+    var release = null;
+    try {
+        var r = await licensesApiRequest('/api/extensionRelease');
+        if (r.ok && r.data) release = r.data;
+    } catch (e) {}
+    var hasRelease = release && (release.version !== undefined || release.publishedAt !== undefined);
+    if (hasRelease) {
+        loadReleaseIntoBar(release);
+        var currentKey = (release.version != null ? String(release.version) : '') + '_' + (release.publishedAt != null ? String(release.publishedAt) : '');
+        if (currentKey && currentKey !== '_') {
+            var lastSeen = '';
+            try { lastSeen = localStorage.getItem(RELEASE_STORAGE_KEY) || ''; } catch (e) {}
+            if (lastSeen !== currentKey) {
+                window._lastExtensionReleaseKey = currentKey;
+                var msgEl = document.getElementById('modal-extension-release-message');
+                if (msgEl && release.message) msgEl.textContent = release.message;
+                else if (msgEl) msgEl.textContent = 'Baixe a nova versão no botão abaixo.';
+                var modal = getReleaseModalEl();
+                if (modal) modal.classList.add('show');
+            }
+        }
+        return;
+    }
+    try {
+        // Cache-buster: adiciona timestamp para evitar cache do navegador/CDN
+        var res = await fetch('/version.json?_=' + Date.now());
+        if (res.ok) {
+            var fallback = await res.json();
+            if (fallback && (fallback.version != null || fallback.publishedAt != null || fallback.date != null)) {
+                loadReleaseIntoBar({ version: fallback.version, publishedAt: fallback.publishedAt || fallback.date, filename: fallback.filename });
+                return;
+            }
+        }
+    } catch (e) {}
+    loadReleaseIntoBar(null);
+}
+
+async function createPanelUserSubmit() {
+    var nameEl = document.getElementById('panel-user-name');
+    var emailEl = document.getElementById('panel-user-email');
+    var passEl = document.getElementById('panel-user-password');
+    var confirmEl = document.getElementById('panel-user-password-confirm');
+    var errEl = document.getElementById('panel-user-error');
+    var btn = document.getElementById('btn-create-panel-user');
+    var displayName = (nameEl && nameEl.value || '').trim();
+    var email = (emailEl && emailEl.value || '').trim().toLowerCase();
+    var password = (passEl && passEl.value) || '';
+    var passwordConfirm = (confirmEl && confirmEl.value) || '';
+    if (errEl) { errEl.style.display = 'none'; errEl.textContent = ''; }
+    if (!displayName) {
+        if (errEl) { errEl.textContent = 'Informe o nome do usuário.'; errEl.style.display = 'block'; errEl.classList.add('alert-error'); }
+        return;
+    }
+    if (!email) {
+        if (errEl) { errEl.textContent = 'Informe o e-mail.'; errEl.style.display = 'block'; errEl.classList.add('alert-error'); }
+        return;
+    }
+    if (password.length < 6) {
+        if (errEl) { errEl.textContent = 'A senha deve ter no mínimo 6 caracteres.'; errEl.style.display = 'block'; errEl.classList.add('alert-error'); }
+        return;
+    }
+    if (password !== passwordConfirm) {
+        if (errEl) { errEl.textContent = 'A confirmação da senha não confere.'; errEl.style.display = 'block'; errEl.classList.add('alert-error'); }
+        return;
+    }
+    var apiUrl = typeof CREATE_PANEL_USER_API_URL !== 'undefined' ? CREATE_PANEL_USER_API_URL : '';
+    if (!apiUrl) {
+        if (errEl) { errEl.textContent = 'Configure CREATE_PANEL_USER_API_URL na configuração.'; errEl.style.display = 'block'; errEl.classList.add('alert-error'); }
+        return;
+    }
+    if (!currentUser) {
+        if (errEl) { errEl.textContent = 'Sessão expirada. Faça login novamente.'; errEl.style.display = 'block'; errEl.classList.add('alert-error'); }
+        return;
+    }
+    if (btn) { btn.disabled = true; btn.textContent = 'Gerando...'; }
+    try {
+        var token = await currentUser.getIdToken();
+        var res = await fetch(apiUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+            body: JSON.stringify({ email: email, password: password, displayName: displayName })
+        });
+        var data = await res.json().catch(function () { return {}; });
+        if (res.ok && data.success) {
+            showAlert('Semi-admin criado. Já pode entrar com esse e-mail e senha.', 'success');
+            if (nameEl) nameEl.value = '';
+            if (emailEl) emailEl.value = '';
+            if (passEl) passEl.value = '';
+            if (confirmEl) confirmEl.value = '';
+            if (typeof loadPanelUsers === 'function') loadPanelUsers();
+        } else {
+            if (errEl) { errEl.textContent = data.error || 'Não foi possível criar o acesso. Tente novamente.'; errEl.style.display = 'block'; errEl.classList.add('alert-error'); }
+        }
+    } catch (e) {
+        if (errEl) { errEl.textContent = 'Erro de conexão. Verifique a URL da API.'; errEl.style.display = 'block'; errEl.classList.add('alert-error'); }
+    }
+    if (btn) { btn.disabled = false; btn.textContent = 'Gerar acesso'; }
+}
+
+async function loadMain() {
+    if (!currentUser || !currentUser.uid) return;
+    licenseManager.setOwnerId(currentUser.uid);
+
+    // Semi-admin não tem permissão para listar licenças (backend retorna 403).
+    // A UI já esconde a tabela/stats via applyMasterUI(); aqui evitamos a
+    // chamada de API que falharia de qualquer forma.
+    if (!isMasterUser()) return;
+
+    if (isMasterUser() && typeof migrateUnassignedLicensesToOwner === 'function') {
+        try {
+            var migrationKey = 'lovable_migration_owner_done';
+            if (!localStorage.getItem(migrationKey)) {
+                var r = await migrateUnassignedLicensesToOwner(currentUser.uid);
+                if (r.migrated > 0) localStorage.setItem(migrationKey, '1');
+            }
+        } catch (e) {}
+    }
+    await licenseManager.loadLicenses();
+    const stats = await licenseManager.getStats();
+    allLicensesCache = licenseManager.licenses;
+
+    const statsGrid = document.getElementById('stats-grid');
+    if (statsGrid) {
+        statsGrid.innerHTML = `
+            <div class="stat-card"><div class="stat-number">${stats.total}</div><div class="stat-label">Total</div></div>
+            <div class="stat-card"><div class="stat-number">${stats.active}</div><div class="stat-label">Ativas</div></div>
+            <div class="stat-card"><div class="stat-number">${stats.activated}</div><div class="stat-label">Ativadas</div></div>
+            <div class="stat-card"><div class="stat-number">${stats.expired}</div><div class="stat-label">Expiradas</div></div>
+            <div class="stat-card"><div class="stat-number">${stats.expiringSoon ?? 0}</div><div class="stat-label">Expirando em breve</div></div>
+        `;
+    }
+
+    renderTable(sortLicenses(allLicensesCache));
+    attachTableButtonListeners();
+}
+
+/**
+ * Atualiza o visual do botão de ordenação por nome (toggle ativo/inativo).
+ */
+function updateSortButton(btn) {
+    if (!btn) return;
+    if (sortByNameActive) {
+        btn.textContent = 'A → Z ativado';
+        btn.style.background = 'linear-gradient(to right, rgba(96,165,250,0.8), rgba(6,182,212,0.8))';
+        btn.style.color = '#fff';
+        btn.style.borderColor = 'transparent';
+    } else {
+        btn.textContent = 'Ordenar por nome';
+        btn.style.background = 'rgba(255,255,255,0.05)';
+        btn.style.color = '#d1d5db';
+        btn.style.borderColor = 'rgba(255,255,255,0.1)';
+    }
+}
+
+/**
+ * Se a ordenação por nome estiver ativa, ordena A→Z pelo userName.
+ * Caso contrário, retorna a lista na ordem original.
+ */
+function sortLicenses(licenses) {
+    if (!sortByNameActive) return licenses;
+    const sorted = [...licenses];
+    sorted.sort((a, b) => {
+        const nameA = (a.userName || '').toLowerCase();
+        const nameB = (b.userName || '').toLowerCase();
+        if (nameA < nameB) return -1;
+        if (nameA > nameB) return 1;
+        return 0;
+    });
+    return sorted;
+}
+
+/**
+ * Filtra e renderiza as licenças com base no termo de pesquisa.
+ * Pesquisa por nome do usuário ou chave da licença.
+ * Aplica a ordenação selecionada antes de renderizar.
+ */
+function filterAndRenderLicenses(searchTerm) {
+    let list = allLicensesCache;
+    
+    if (searchTerm && searchTerm.trim() !== '') {
+        const term = searchTerm.trim().toLowerCase();
+        list = allLicensesCache.filter(license => {
+            const name = (license.userName || '').toLowerCase();
+            const key = (license.key || '').toLowerCase();
+            const phone = (license.userPhone || '').toLowerCase();
+            return name.includes(term) || key.includes(term) || phone.includes(term);
+        });
+    }
+    
+    renderTable(sortLicenses(list));
+}
+
+function renderTable(licenses) {
+    const tbody = document.getElementById('licenses-tbody');
+    if (!tbody) return;
+    tbody.innerHTML = '';
+
+    licenses.forEach(license => {
+        const tr = document.createElement('tr');
+        let statusClass = 'status-inactive';
+        let statusText = 'Inativa';
+        if (license.active) {
+            statusClass = isExpired(license) ? 'status-inactive' : (isExpiringSoon(license) ? 'status-expiring' : 'status-active');
+            statusText = isExpired(license) ? 'Expirada' : (isExpiringSoon(license) ? 'Expirando' : 'Ativa');
+        }
+        const activatedText = license.activated ? 'Sim' : 'Não';
+        // Formatar data de expiração corretamente, extraindo apenas a parte da data da ISO string
+        let expiryDisplay = 'Vitalício';
+        if (!license.lifetime && license.expiryDate) {
+            // Extrair a data da string ISO (YYYY-MM-DD) para evitar problemas de timezone
+            const isoDate = license.expiryDate.substring(0, 10);
+            const [year, month, day] = isoDate.split('-');
+            expiryDisplay = `${day}/${month}/${year}`;
+        }
+
+        tr.innerHTML = `
+            <td><div class="license-key">${escapeHtml(license.key)}</div></td>
+            <td>${escapeHtml(license.userName || '—')}</td>
+            <td>${escapeHtml(license.userPhone || '—')}</td>
+            <td><span class="status-badge-small ${statusClass}">${statusText}</span></td>
+            <td>${activatedText}</td>
+            <td>${expiryDisplay}</td>
+            <td>
+                <div class="action-buttons">
+                    <button type="button" class="action-btn-small btn-edit" data-key="${escapeAttr(license.key)}">Editar</button>
+                    <button type="button" class="action-btn-small btn-copy" data-key="${escapeAttr(license.key)}">Copiar</button>
+                    <button type="button" class="action-btn-small btn-toggle" data-key="${escapeAttr(license.key)}" data-active="${license.active}">${license.active ? 'Desativar' : 'Ativar'}</button>
+                    <button type="button" class="action-btn-small delete btn-delete" data-key="${escapeAttr(license.key)}">Deletar</button>
+                </div>
+            </td>
+        `;
+        tbody.appendChild(tr);
+    });
+
+    if (licenses.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: var(--text-secondary); padding: 24px;">Nenhuma licença encontrada</td></tr>';
+    }
+    attachTableButtonListeners();
+}
+
+function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+}
+function escapeAttr(str) {
+    return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+}
+
+function attachTableButtonListeners() {
+    document.querySelectorAll('.btn-edit').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            const key = e.currentTarget.getAttribute('data-key');
+            openEditModal(key);
+        });
+    });
+    document.querySelectorAll('.btn-copy').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            const key = e.currentTarget.getAttribute('data-key');
+            copyLicense(key, e.currentTarget);
+        });
+    });
+    document.querySelectorAll('.btn-toggle').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            const key = e.currentTarget.getAttribute('data-key');
+            const active = e.currentTarget.getAttribute('data-active') === 'true';
+            toggleLicense(key, !active);
+        });
+    });
+    document.querySelectorAll('.btn-delete').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            const key = e.currentTarget.getAttribute('data-key');
+            deleteLicenseConfirm(key);
+        });
+    });
+}
+
+function openCreateModal() {
+    document.getElementById('create-user-name').value = '';
+    document.getElementById('create-user-phone').value = '';
+    document.getElementById('create-license-lifetime').checked = false;
+    document.getElementById('create-expiry-days').value = '30';
+    document.getElementById('create-expiry-days-group').style.display = 'block';
+    document.getElementById('create-max-uses').value = '';
+    document.getElementById('create-result').style.display = 'none';
+    document.getElementById('modal-create').classList.add('show');
+}
+
+function closeCreateModal() {
+    document.getElementById('modal-create').classList.remove('show');
+}
+
+function openTestKeysModal() {
+    document.getElementById('test-keys-expiry-hours').value = '1';
+    document.getElementById('test-keys-quantity').value = '1';
+    const resultEl = document.getElementById('test-keys-result');
+    const listEl = document.getElementById('test-keys-list');
+    if (resultEl) resultEl.style.display = 'none';
+    if (listEl) listEl.innerHTML = '';
+    document.getElementById('modal-test-keys').classList.add('show');
+}
+
+function closeTestKeysModal() {
+    document.getElementById('modal-test-keys').classList.remove('show');
+}
+
+async function submitTestKeys() {
+    const expiryHours = parseFloat(document.getElementById('test-keys-expiry-hours')?.value) || 1;
+    let quantity = parseInt(document.getElementById('test-keys-quantity')?.value, 10) || 1;
+    if (quantity < 1) quantity = 1;
+    if (quantity > 20) {
+        showAlert('Quantidade deve ser entre 1 e 20.', 'error');
+        return;
+    }
+    const btn = document.getElementById('btn-test-keys-generate');
+    if (btn) btn.disabled = true;
+    try {
+        const keys = [];
+        for (let i = 0; i < quantity; i++) {
+            const license = await licenseManager.generateTestLicense(expiryHours, quantity > 1 ? i + 1 : null);
+            keys.push(license.key);
+        }
+        const listEl = document.getElementById('test-keys-list');
+        const resultEl = document.getElementById('test-keys-result');
+        if (listEl) {
+            listEl.innerHTML = '';
+            keys.forEach(function (key) {
+                const row = document.createElement('div');
+                row.className = 'test-key-row';
+                const input = document.createElement('input');
+                input.type = 'text';
+                input.className = 'test-key-value';
+                input.readOnly = true;
+                input.value = key;
+                const copyBtn = document.createElement('button');
+                copyBtn.type = 'button';
+                copyBtn.className = 'test-key-copy';
+                copyBtn.setAttribute('aria-label', 'Copiar chave');
+                copyBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+                const feedback = document.createElement('span');
+                feedback.className = 'test-key-feedback';
+                row.appendChild(input);
+                row.appendChild(copyBtn);
+                row.appendChild(feedback);
+                listEl.appendChild(row);
+            });
+        }
+        if (resultEl) resultEl.style.display = 'block';
+        loadMain();
+        const hourLabel = expiryHours === 0.5 ? '30 minutos' : expiryHours === 1 ? '1 hora' : `${expiryHours} horas`;
+        showAlert(quantity === 1
+            ? `1 chave de teste criada. Válida por ${hourLabel}. Copie e envie ao cliente.`
+            : `${quantity} chaves de teste criadas. Válidas por ${hourLabel}. Copie e envie ao cliente.`, 'success');
+    } catch (err) {
+        showAlert('Erro ao gerar chaves: ' + (err.message || err), 'error');
+    } finally {
+        if (btn) btn.disabled = false;
+    }
+}
+
+function submitCreateLicense() {
+    const userName = document.getElementById('create-user-name')?.value.trim() || '';
+    const userPhone = document.getElementById('create-user-phone')?.value.trim() || '';
+    const isLifetime = document.getElementById('create-license-lifetime')?.checked === true;
+    const expiryDays = isLifetime ? 30 : (parseInt(document.getElementById('create-expiry-days')?.value) || 30);
+    const maxUsesEl = document.getElementById('create-max-uses');
+    const maxUses = maxUsesEl?.value ? parseInt(maxUsesEl.value) : null;
+
+    licenseManager.generateLicense(expiryDays, maxUses, userName, userPhone, isLifetime).then(license => {
+        document.getElementById('create-new-license-key').textContent = license.key;
+        document.getElementById('create-result').style.display = 'block';
+        showAlert('Licença gerada com sucesso. Salva na nuvem.', 'success');
+        loadMain();
+    }).catch(err => {
+        showAlert('Erro ao gerar licença: ' + (err.message || err), 'error');
+    });
+}
+
+function copyCreatedLicense() {
+    const key = document.getElementById('create-new-license-key')?.textContent || '';
+    if (!key) return;
+    navigator.clipboard.writeText(key).then(() => {
+        showCopyToast(true);
+        const btn = document.getElementById('btn-create-copy');
+        if (btn) { const t = btn.textContent; btn.textContent = 'Copiado!'; btn.disabled = true; setTimeout(() => { btn.textContent = t; btn.disabled = false; }, 2000); }
+    }).catch(() => showCopyToast(false));
+}
+
+async function openEditModal(key) {
+    const license = await licenseManager.getLicenseInfo(key);
+    if (!license) {
+        showAlert('Licença não encontrada.', 'error');
+        return;
+    }
+    document.getElementById('edit-license-key').value = license.key;
+    document.getElementById('edit-license-key-display').textContent = license.key;
+    document.getElementById('edit-user-name').value = license.userName || '';
+    document.getElementById('edit-user-phone').value = license.userPhone || '';
+    document.getElementById('edit-active').checked = !!license.active;
+    document.getElementById('edit-lifetime').checked = !!license.lifetime;
+    const expiryGroup = document.getElementById('edit-expiry-group');
+    const expiryInput = document.getElementById('edit-expiry-date');
+    if (license.lifetime) {
+        expiryGroup.style.display = 'none';
+    } else {
+        expiryGroup.style.display = 'block';
+        // Extrair a data diretamente da string ISO para evitar problemas de timezone
+        if (license.expiryDate) {
+            expiryInput.value = license.expiryDate.substring(0, 10);
+        } else {
+            expiryInput.value = '';
+        }
+    }
+    document.getElementById('edit-max-uses').value = license.maxUses != null && license.maxUses !== '' ? String(license.maxUses) : '';
+    document.getElementById('modal-edit').classList.add('show');
+}
+
+function closeEditModal() {
+    document.getElementById('modal-edit').classList.remove('show');
+}
+
+async function submitEditLicense() {
+    const key = document.getElementById('edit-license-key').value;
+    const userName = document.getElementById('edit-user-name')?.value.trim() || '';
+    const userPhone = document.getElementById('edit-user-phone')?.value.trim() || '';
+    const active = document.getElementById('edit-active').checked;
+    const lifetime = document.getElementById('edit-lifetime').checked;
+    const expiryDateInput = document.getElementById('edit-expiry-date').value;
+    const maxUsesEl = document.getElementById('edit-max-uses');
+    const maxUses = maxUsesEl?.value ? parseInt(maxUsesEl.value) : null;
+
+    let expiryDate;
+    if (lifetime) {
+        expiryDate = new Date('9999-12-31T23:59:59.999Z').toISOString();
+    } else if (expiryDateInput) {
+        expiryDate = new Date(expiryDateInput + 'T23:59:59.999Z').toISOString();
+    } else {
+        showAlert('Informe a data de expiração ou marque vitalícia.', 'error');
+        return;
+    }
+
+    try {
+        await licenseManager.editLicense(key, {
+            userName,
+            userPhone,
+            active,
+            lifetime,
+            expiryDate,
+            maxUses
+        });
+        showAlert('Licença atualizada.', 'success');
+        closeEditModal();
+        loadMain();
+    } catch (err) {
+        showAlert('Erro ao salvar: ' + (err.message || err), 'error');
+    }
+}
+
+function copyLicense(key, buttonEl) {
+    navigator.clipboard.writeText(key).then(() => {
+        showCopyToast(true);
+        if (buttonEl) { const t = buttonEl.textContent; buttonEl.textContent = 'Copiado!'; buttonEl.disabled = true; setTimeout(() => { buttonEl.textContent = t; buttonEl.disabled = false; }, 2000); }
+    }).catch(() => { showCopyToast(false); showAlert('Erro ao copiar.', 'error'); });
+}
+
+function showCopyToast(success) {
+    const toast = document.getElementById('copy-toast');
+    if (!toast) return;
+    toast.textContent = success ? 'Copiado!' : 'Erro ao copiar';
+    toast.style.background = success ? 'rgba(16, 185, 129, 0.95)' : 'rgba(239, 68, 68, 0.95)';
+    toast.classList.add('show');
+    setTimeout(() => toast.classList.remove('show'), 2000);
+}
+
+async function toggleLicense(key, activate) {
+    try {
+        if (activate) await licenseManager.reactivateLicense(key);
+        else await licenseManager.deactivateLicense(key);
+        showAlert(activate ? 'Licença reativada.' : 'Licença desativada.', 'success');
+        loadMain();
+    } catch (err) {
+        showAlert('Erro: ' + (err.message || err), 'error');
+    }
+}
+
+function deleteLicenseConfirm(key) {
+    currentAction = async () => {
+        try {
+            await licenseManager.deleteLicense(key);
+            showAlert('Licença deletada.', 'success');
+            closeModal();
+            loadMain();
+        } catch (err) {
+            showAlert('Erro: ' + (err.message || err), 'error');
+        }
+    };
+    showModal('Deletar licença', 'Tem certeza? Esta ação não pode ser desfeita.');
+}
+
+async function exportLicenses() {
+    try {
+        const json = await licenseManager.exportLicenses();
+        const textarea = document.getElementById('export-textarea');
+        if (textarea) textarea.value = json;
+        showAlert('Licenças exportadas.', 'success');
+    } catch (err) {
+        showAlert('Erro: ' + (err.message || err), 'error');
+    }
+}
+
+function copyExport() {
+    const textarea = document.getElementById('export-textarea');
+    if (!textarea?.value) { showAlert('Exporte primeiro.', 'error'); return; }
+    navigator.clipboard.writeText(textarea.value).then(() => showAlert('JSON copiado.', 'success')).catch(() => showAlert('Erro ao copiar.', 'error'));
+}
+
+async function importLicenses() {
+    const textarea = document.getElementById('import-textarea');
+    const json = textarea?.value?.trim() || '';
+    if (!json) { showAlert('Cole o JSON das licenças.', 'error'); return; }
+    try {
+        const result = await licenseManager.importLicenses(json);
+        showAlert(result.message || 'Importado.', result.success ? 'success' : 'error');
+        if (result.success && textarea) textarea.value = '';
+        if (result.success) loadMain();
+    } catch (err) {
+        showAlert('Erro: ' + (err.message || err), 'error');
+    }
+}
+
+function showAlert(message, type) {
+    const el = document.getElementById('alert-main');
+    if (!el) return;
+    el.textContent = message;
+    el.className = 'alert show alert-' + type;
+    setTimeout(() => el.classList.remove('show'), 5000);
+}
+
+function showModal(title, message) {
+    const titleEl = document.getElementById('modal-title');
+    const messageEl = document.getElementById('modal-message');
+    if (titleEl) titleEl.textContent = title;
+    if (messageEl) messageEl.textContent = message;
+    document.getElementById('confirm-modal')?.classList.add('show');
+}
+
+function closeModal() {
+    document.getElementById('confirm-modal')?.classList.remove('show');
+    currentAction = null;
+}
+
+function confirmAction() {
+    if (currentAction) currentAction();
+}
+
+// ==================== GERENCIAMENTO DE USUÁRIOS DO PAINEL ====================
+
+let panelUsersCache = [];
+let licensesCountByOwner = {}; // Contagem de licenças ativas por ownerId
+
+/**
+ * Busca todas as licenças e conta por ownerId.
+ * Retorna um objeto { ownerId: { total, active } }
+ */
+async function fetchLicensesCountByOwner() {
+    try {
+        var r = await licensesApiRequest('/api/listLicenses');
+        if (!r.ok || !r.data || !Array.isArray(r.data.licenses)) return {};
+        const result = {};
+        r.data.licenses.forEach(function(lic) { result[lic.key] = lic; });
+        if (!result || typeof result !== 'object') return {};
+        
+        const counts = {};
+        Object.values(result).forEach(license => {
+            if (!license || !license.ownerId) return;
+            const ownerId = license.ownerId;
+            if (!counts[ownerId]) {
+                counts[ownerId] = { total: 0, active: 0 };
+            }
+            counts[ownerId].total++;
+            // Contar como ativa se active === true e não estiver expirada
+            if (license.active && !isExpired(license)) {
+                counts[ownerId].active++;
+            }
+        });
+        return counts;
+    } catch (e) {
+        console.error('[fetchLicensesCountByOwner] Erro:', e);
+        return {};
+    }
+}
+
+async function loadPanelUsers() {
+    const tbody = document.getElementById('panel-users-tbody');
+    if (!tbody) return;
+    tbody.innerHTML = '<tr><td colspan="8" style="text-align: center; color: #9ca3af; padding: 24px;">Carregando...</td></tr>';
+
+    var apiUrl = typeof LIST_PANEL_USERS_API_URL !== 'undefined' ? LIST_PANEL_USERS_API_URL : '';
+    if (!apiUrl || !currentUser) {
+        tbody.innerHTML = '<tr><td colspan="8" style="text-align: center; color: #fca5a5; padding: 24px;">Configure LIST_PANEL_USERS_API_URL ou faça login.</td></tr>';
+        return;
+    }
+
+    try {
+        // Buscar usuários e contagem de licenças em paralelo
+        var token = await currentUser.getIdToken();
+        var [usersRes, licenseCounts] = await Promise.all([
+            fetch(apiUrl, {
+                method: 'GET',
+                headers: { 'Authorization': 'Bearer ' + token }
+            }),
+            fetchLicensesCountByOwner()
+        ]);
+        
+        var data = await usersRes.json().catch(function () { return {}; });
+        if (!usersRes.ok || !data.success) {
+            tbody.innerHTML = '<tr><td colspan="8" style="text-align: center; color: #fca5a5; padding: 24px;">' + escapeHtml(data.error || 'Erro ao carregar usuários.') + '</td></tr>';
+            return;
+        }
+        
+        panelUsersCache = data.users || [];
+        licensesCountByOwner = licenseCounts;
+        renderPanelUsersTable(panelUsersCache);
+        updateSemiAdminSlots(panelUsersCache);
+    } catch (e) {
+        tbody.innerHTML = '<tr><td colspan="8" style="text-align: center; color: #fca5a5; padding: 24px;">Erro de conexão.</td></tr>';
+    }
+}
+
+/** Atualiza o contador "X/2 semi-admins" e desabilita o formulário de criação quando o limite é atingido. */
+function updateSemiAdminSlots(users) {
+    var count = (users || []).filter(function (u) { return u.role === 'semi_admin'; }).length;
+    var maxSlots = 2;
+    var label = document.getElementById('semi-admin-slots');
+    if (label) label.textContent = count + '/' + maxSlots + ' semi-admins';
+
+    var createBtn = document.getElementById('btn-create-panel-user');
+    var errEl = document.getElementById('panel-user-error');
+    if (createBtn) {
+        var limitReached = count >= maxSlots;
+        createBtn.disabled = limitReached;
+        createBtn.title = limitReached ? 'Limite de ' + maxSlots + ' semi-admins atingido. Apague um acesso para liberar uma vaga.' : '';
+        if (limitReached && errEl) {
+            errEl.textContent = 'Limite de ' + maxSlots + ' semi-admins atingido. Apague um acesso existente para liberar uma vaga.';
+            errEl.style.display = 'block';
+            errEl.classList.remove('alert-error');
+            errEl.classList.add('alert');
+        } else if (errEl && errEl.classList.contains('alert') && !errEl.classList.contains('alert-error')) {
+            errEl.style.display = 'none';
+        }
+    }
+}
+
+function renderPanelUsersTable(users) {
+    const tbody = document.getElementById('panel-users-tbody');
+    if (!tbody) return;
+    tbody.innerHTML = '';
+
+    if (!users || users.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="8" style="text-align: center; color: #9ca3af; padding: 24px;">Nenhum usuário cadastrado.</td></tr>';
+        return;
+    }
+
+    users.forEach(function (user) {
+        const tr = document.createElement('tr');
+        const isDisabled = !!user.disabled;
+        const validUntil = user.validUntil;
+        const isLifetime = validUntil === -1 || validUntil === '-1' || validUntil === null || validUntil === undefined;
+        let validityText = 'Vitalício';
+        let isUserExpired = false;
+        if (!isLifetime && validUntil) {
+            const expDate = new Date(Number(validUntil));
+            if (!isNaN(expDate.getTime())) {
+                validityText = expDate.toLocaleDateString('pt-BR');
+                isUserExpired = expDate < new Date();
+            }
+        }
+        const statusClass = isDisabled ? 'status-inactive' : (isUserExpired ? 'status-expiring' : 'status-active');
+        const statusText = isDisabled ? 'Desativado' : (isUserExpired ? 'Expirado' : 'Ativo');
+        const createdAt = user.createdAt ? new Date(user.createdAt).toLocaleDateString('pt-BR') : '—';
+        const isSemiAdmin = user.role === 'semi_admin';
+        const roleBadge = isSemiAdmin
+            ? '<span class="status-badge-small" style="background: rgba(96,165,250,0.15); color: #60a5fa; border-color: rgba(96,165,250,0.4);">Semi-admin</span>'
+            : '<span class="status-badge-small" style="background: rgba(163,230,53,0.15); color: #a3e635; border-color: rgba(163,230,53,0.4);">Master</span>';
+        const isSelf = currentUser && user.uid === currentUser.uid;
+
+        // Buscar contagem de licenças deste usuário
+        const licenseStats = licensesCountByOwner[user.uid] || { total: 0, active: 0 };
+        const licensesDisplay = `${licenseStats.active} / ${licenseStats.total}`;
+
+        tr.innerHTML = `
+            <td><div class="license-key" style="font-size: 12px;">${escapeHtml(user.email || '—')}</div></td>
+            <td>${escapeHtml(user.displayName || '—')}</td>
+            <td>${roleBadge}</td>
+            <td><span class="status-badge-small status-active" style="background: rgba(96,165,250,0.15); color: #60a5fa; border-color: rgba(96,165,250,0.4);" title="Ativas / Total">${licensesDisplay}</span></td>
+            <td><span class="status-badge-small ${statusClass}">${statusText}</span></td>
+            <td>${validityText}</td>
+            <td>${createdAt}</td>
+            <td>
+                <div class="action-buttons">
+                    ${isSelf ? '<span style="color:#6b7280;font-size:12px;">Sua conta</span>' : `
+                    <button type="button" class="action-btn-small btn-edit-panel-user" data-uid="${escapeAttr(user.uid)}">Editar</button>
+                    <button type="button" class="action-btn-small delete btn-delete-panel-user" data-uid="${escapeAttr(user.uid)}" data-email="${escapeAttr(user.email || '')}">Apagar</button>
+                    `}
+                </div>
+            </td>
+        `;
+        tbody.appendChild(tr);
+    });
+
+    attachPanelUserButtonListeners();
+}
+
+function attachPanelUserButtonListeners() {
+    document.querySelectorAll('.btn-edit-panel-user').forEach(function (btn) {
+        btn.addEventListener('click', function (e) {
+            var uid = e.currentTarget.getAttribute('data-uid');
+            openEditPanelUserModal(uid);
+        });
+    });
+    document.querySelectorAll('.btn-delete-panel-user').forEach(function (btn) {
+        btn.addEventListener('click', function (e) {
+            var uid = e.currentTarget.getAttribute('data-uid');
+            var email = e.currentTarget.getAttribute('data-email');
+            deletePanelUserConfirm(uid, email);
+        });
+    });
+}
+
+function openEditPanelUserModal(uid) {
+    var user = panelUsersCache.find(function (u) { return u.uid === uid; });
+    if (!user) {
+        showAlertAdmin('Usuário não encontrado.', 'error');
+        return;
+    }
+    document.getElementById('edit-panel-user-uid').value = user.uid;
+    document.getElementById('edit-panel-user-email').value = user.email || '';
+    document.getElementById('edit-panel-user-name').value = user.displayName || '';
+    document.getElementById('edit-panel-user-new-password').value = '';
+    document.getElementById('edit-panel-user-disabled').checked = !!user.disabled;
+
+    var validUntil = user.validUntil;
+    var isLifetime = validUntil === -1 || validUntil === '-1' || validUntil === null || validUntil === undefined;
+    document.getElementById('edit-panel-user-lifetime').checked = isLifetime;
+    var validGroup = document.getElementById('edit-panel-user-valid-until-group');
+    if (validGroup) validGroup.style.display = isLifetime ? 'none' : 'block';
+
+    if (!isLifetime && validUntil) {
+        var d = new Date(Number(validUntil));
+        if (!isNaN(d.getTime())) {
+            document.getElementById('edit-panel-user-valid-until').value = d.toISOString().slice(0, 10);
+        } else {
+            document.getElementById('edit-panel-user-valid-until').value = '';
+        }
+    } else {
+        document.getElementById('edit-panel-user-valid-until').value = '';
+    }
+
+    document.getElementById('modal-edit-panel-user').classList.add('show');
+}
+
+function closeEditPanelUserModal() {
+    document.getElementById('modal-edit-panel-user').classList.remove('show');
+}
+
+async function submitEditPanelUser() {
+    var uid = document.getElementById('edit-panel-user-uid').value;
+    var newEmail = (document.getElementById('edit-panel-user-email').value || '').trim().toLowerCase();
+    var displayName = (document.getElementById('edit-panel-user-name').value || '').trim();
+    var newPassword = document.getElementById('edit-panel-user-new-password').value || '';
+    var disabled = document.getElementById('edit-panel-user-disabled').checked;
+    var isLifetime = document.getElementById('edit-panel-user-lifetime').checked;
+    var validUntilInput = document.getElementById('edit-panel-user-valid-until').value;
+
+    var validUntil = -1;
+    if (!isLifetime && validUntilInput) {
+        var d = new Date(validUntilInput + 'T23:59:59.999Z');
+        if (!isNaN(d.getTime())) {
+            validUntil = d.getTime();
+        }
+    }
+
+    if (!newEmail) {
+        showAlertAdmin('O e-mail não pode ficar vazio.', 'error');
+        return;
+    }
+
+    if (newPassword && newPassword.length < 6) {
+        showAlertAdmin('A senha deve ter no mínimo 6 caracteres.', 'error');
+        return;
+    }
+
+    var apiUrl = typeof UPDATE_PANEL_USER_API_URL !== 'undefined' ? UPDATE_PANEL_USER_API_URL : '';
+    if (!apiUrl || !currentUser) {
+        showAlertAdmin('Configure UPDATE_PANEL_USER_API_URL ou faça login.', 'error');
+        return;
+    }
+
+    var btn = document.getElementById('btn-edit-panel-user-submit');
+    if (btn) { btn.disabled = true; btn.textContent = 'Salvando...'; }
+
+    try {
+        var token = await currentUser.getIdToken();
+        var body = { uid: uid, email: newEmail, displayName: displayName, disabled: disabled, validUntil: validUntil };
+        if (newPassword) body.password = newPassword;
+
+        var res = await fetch(apiUrl, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+            body: JSON.stringify(body)
+        });
+        var data = await res.json().catch(function () { return {}; });
+        if (res.ok && data.success) {
+            showAlertAdmin('Usuário atualizado com sucesso.', 'success');
+            closeEditPanelUserModal();
+            loadPanelUsers();
+        } else {
+            showAlertAdmin(data.error || 'Erro ao atualizar usuário.', 'error');
+        }
+    } catch (e) {
+        showAlertAdmin('Erro de conexão.', 'error');
+    }
+
+    if (btn) { btn.disabled = false; btn.textContent = 'Salvar'; }
+}
+
+async function cleanupOrphanedLicenses() {
+    var apiUrl = typeof CLEANUP_ORPHANED_LICENSES_API_URL !== 'undefined' ? CLEANUP_ORPHANED_LICENSES_API_URL : '';
+    if (!apiUrl || !currentUser) {
+        showAlertAdmin('Faça login para usar esta ação.', 'error');
+        return;
+    }
+    var btn = document.getElementById('btn-cleanup-orphaned-licenses');
+    if (btn) { btn.disabled = true; btn.textContent = 'Limpando...'; }
+    try {
+        var token = await currentUser.getIdToken();
+        var res = await fetch(apiUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token }
+        });
+        var data = await res.json().catch(function () { return {}; });
+        if (res.ok && data.success) {
+            var msg = data.deletedCount === 0
+                ? 'Nenhuma licença órfã encontrada.'
+                : 'Removidas ' + data.deletedCount + ' licença(s) de ex-sócios.';
+            showAlertAdmin(msg, 'success');
+            if (data.deletedCount > 0 && typeof licenseManager !== 'undefined' && licenseManager.loadLicenses) {
+                await licenseManager.loadLicenses();
+                allLicensesCache = licenseManager.licenses;
+                renderTable(sortLicenses(allLicensesCache));
+            }
+        } else {
+            showAlertAdmin(data.error || 'Erro ao limpar licenças.', 'error');
+        }
+    } catch (e) {
+        showAlertAdmin('Erro de conexão.', 'error');
+    }
+    if (btn) { btn.disabled = false; btn.textContent = 'Limpar licenças de ex-sócios'; }
+}
+
+function deletePanelUserConfirm(uid, email) {
+    currentAction = async function () {
+        var apiUrl = typeof DELETE_PANEL_USER_API_URL !== 'undefined' ? DELETE_PANEL_USER_API_URL : '';
+        if (!apiUrl || !currentUser) {
+            showAlertAdmin('Configure DELETE_PANEL_USER_API_URL ou faça login.', 'error');
+            closeModal();
+            return;
+        }
+
+        try {
+            var token = await currentUser.getIdToken();
+            var res = await fetch(apiUrl, {
+                method: 'DELETE',
+                headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+                body: JSON.stringify({ uid: uid })
+            });
+            var data = await res.json().catch(function () { return {}; });
+            if (res.ok && data.success) {
+                showAlertAdmin('Usuário removido com sucesso.', 'success');
+                loadPanelUsers();
+            } else {
+                showAlertAdmin(data.error || 'Erro ao remover usuário.', 'error');
+            }
+        } catch (e) {
+            showAlertAdmin('Erro de conexão.', 'error');
+        }
+        closeModal();
+    };
+    showModal('Apagar sócio', 'Tem certeza que deseja apagar o usuário "' + (email || uid) + '"? Todas as licenças vinculadas a esse sócio serão removidas e o acesso ao painel será revogado. Esta ação não pode ser desfeita.');
+}
+
+function showAlertAdmin(message, type) {
+    var el = document.getElementById('alert-admin');
+    if (!el) {
+        // Fallback para alert principal
+        showAlert(message, type);
+        return;
+    }
+    el.textContent = message;
+    el.className = 'alert show alert-' + type;
+    setTimeout(function () { el.classList.remove('show'); }, 5000);
+}
