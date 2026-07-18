@@ -1,0 +1,55 @@
+# ============================================
+# Lovable Infinity - Git ignore
+# ============================================
+
+# Build da extensão (apenas extension-prod passa pelo build)
+extension-prod/build/
+Futura Extensao/build/
+LOVABLE_INFINITY*.zip
+admin/downloads/
+
+# Node modules
+node_modules/
+
+# Logs
+*.log
+
+# Sistema operacional
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Env com chaves (nunca commitar)
+.env
+.env.*
+.env*.local
+
+# Temporários
+*.tmp
+temp/
+.cache/
+
+# Backups
+*.backup
+*.bak
+backup/
+
+# Arquivos de build
+dist/
+build/
+
+# Supabase local
+supabase/.temp/
+
+# Vercel
+.vercel
+
+# Playwright/testes
+.playwright-mcp/
