@@ -1,0 +1,502 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Painel de Admin - Lovable Infinity | Criador: Mcamara</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' fill='%231e293b'/><text x='16' y='22' font-size='18' text-anchor='middle' fill='%236366f1'>∞</text></svg>">
+    <link rel="stylesheet" href="styles.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+    <style>
+        /* Design system: glassmorphism, azul #60a5fa, cyan #06b6d4, fundos #121212 / #1f1f1f / #2a2a2a */
+        body.admin-page { width: 100%; min-height: 100vh; height: 100vh; background: #121212; color: #ffffff; margin: 0; box-sizing: border-box; display: flex; flex-direction: column; overflow: hidden; position: relative; }
+        body.admin-page::before { content: ''; position: fixed; inset: 0; background: linear-gradient(to bottom right, rgba(96,165,250,0.05), rgba(6,182,212,0.03), rgba(96,165,250,0.05)); pointer-events: none; z-index: 0; }
+        .admin-topbar { width: 100%; height: 64px; padding: 0 40px; box-sizing: border-box; display: flex; align-items: center; justify-content: space-between; background: rgba(255,255,255,0.05); border-bottom: 1px solid rgba(255,255,255,0.1); flex-shrink: 0; position: relative; z-index: 1; backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px); }
+        .admin-topbar::after { content: ''; position: absolute; bottom: 0; left: 0; right: 0; height: 1px; background: linear-gradient(to right, transparent, rgba(96,165,250,0.3), transparent); }
+        .admin-topbar h1 { font-size: 20px; font-weight: 600; margin: 0; color: #ffffff; letter-spacing: -0.02em; }
+        .admin-topbar-desc { color: #d1d5db; font-size: 13px; font-weight: 400; margin: 2px 0 0 0; }
+        .admin-topbar .btn-cta { padding: 10px 24px; font-size: 14px; font-weight: 600; background: linear-gradient(to right, rgba(96,165,250,0.8), rgba(6,182,212,0.8)); color: #fff; border: none; border-radius: 12px; cursor: pointer; transition: all 0.2s; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1), 0 4px 6px -2px rgba(96,165,250,0.2); }
+        .admin-topbar .btn-cta:hover { background: linear-gradient(to right, #60a5fa, #06b6d4); box-shadow: 0 0 20px rgba(96,165,250,0.3); transform: scale(1.02); }
+        .admin-main { width: 100%; max-width: 1600px; margin: 0 auto; padding: 32px 40px 48px; box-sizing: border-box; position: relative; z-index: 1; }
+        .section { position: relative; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 16px; padding: 28px 32px; margin-bottom: 24px; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1), 0 4px 6px -2px rgba(96,165,250,0.1), 0 0 20px rgba(96,165,250,0.1); backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px); overflow: hidden; }
+        .section::before { content: ''; position: absolute; inset: 0; background: linear-gradient(to bottom right, rgba(96,165,250,0.05), transparent, rgba(6,182,212,0.05)); pointer-events: none; }
+        .section h2 { font-size: 15px; font-weight: 600; margin-bottom: 20px; color: #ffffff; letter-spacing: -0.01em; line-height: 1.4; position: relative; }
+        .form-group { margin-bottom: 18px; position: relative; }
+        .form-group label { display: block; font-size: 12px; font-weight: 500; color: #9ca3af; margin-bottom: 6px; text-transform: none; letter-spacing: 0; }
+        .form-group input, .form-group select, .form-group textarea { width: 100%; padding: 10px 14px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; color: #ffffff; font-family: inherit; font-size: 14px; box-sizing: border-box; transition: all 0.2s; backdrop-filter: blur(10px); }
+        .form-group select { color-scheme: dark; }
+        .form-group select option { background: #1f1f1f; color: #e5e5e5; }
+        .form-group input::placeholder, .form-group textarea::placeholder { color: rgba(255,255,255,0.4); }
+        .form-group input:focus, .form-group select:focus, .form-group textarea:focus { border-color: rgba(96,165,250,0.5); outline: none; box-shadow: 0 0 0 2px rgba(96,165,250,0.2); }
+        .checkbox-label { display: flex; align-items: center; gap: 10px; cursor: pointer; text-transform: none; font-weight: 500; font-size: 14px; color: #d1d5db; }
+        .checkbox-label input { width: auto; accent-color: #60a5fa; }
+        .button-group { display: flex; gap: 10px; margin-top: 22px; flex-wrap: wrap; }
+        .btn { padding: 10px 20px; border: none; border-radius: 12px; font-weight: 500; cursor: pointer; transition: all 0.2s; font-size: 14px; }
+        .btn-primary { background: linear-gradient(to right, rgba(96,165,250,0.8), rgba(6,182,212,0.8)); color: #fff; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1), 0 4px 6px rgba(96,165,250,0.2); }
+        .btn-primary:hover { background: linear-gradient(to right, #60a5fa, #06b6d4); box-shadow: 0 0 20px rgba(96,165,250,0.3); transform: scale(1.02); }
+        .btn-secondary { background: rgba(255,255,255,0.05); color: #d1d5db; border: 1px solid rgba(255,255,255,0.1); }
+        .btn-secondary:hover { background: rgba(255,255,255,0.1); border-color: rgba(96,165,250,0.3); color: #ffffff; }
+        .btn-danger { background: rgba(239, 68, 68, 0.15); color: #fca5a5; border: 1px solid rgba(239, 68, 68, 0.4); }
+        .btn-danger:hover { background: rgba(239, 68, 68, 0.25); border-color: #f87171; color: #fecaca; }
+        .btn-accent { background: linear-gradient(to right, rgba(234, 179, 8, 0.85), rgba(245, 158, 11, 0.85)); color: #1f1f1f; border: none; box-shadow: 0 4px 12px rgba(234, 179, 8, 0.3); }
+        .btn-accent:hover { background: linear-gradient(to right, #eab308, #f59e0b); color: #0f0f0f; box-shadow: 0 0 20px rgba(234, 179, 8, 0.4); transform: scale(1.02); }
+        .stats-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 24px; margin-bottom: 32px; }
+        .stat-card { position: relative; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 16px; padding: 24px; text-align: center; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1), 0 0 20px rgba(96,165,250,0.1); transition: all 0.2s; backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px); overflow: hidden; }
+        .stat-card::before { content: ''; position: absolute; inset: 0; background: linear-gradient(to bottom right, rgba(96,165,250,0.05), transparent, rgba(6,182,212,0.05)); pointer-events: none; }
+        .stat-card:hover { box-shadow: 0 0 25px rgba(96,165,250,0.15); border-color: rgba(96,165,250,0.2); }
+        .stat-number { font-size: 28px; font-weight: 600; color: #ffffff; margin-bottom: 8px; letter-spacing: -0.02em; position: relative; }
+        .stat-label { font-size: 12px; color: #9ca3af; font-weight: 500; text-transform: none; letter-spacing: 0; position: relative; }
+        .license-table { width: 100%; border-collapse: collapse; margin-top: 0; font-size: 13px; }
+        .license-table th { background: #1f1f1f; padding: 12px 16px; text-align: left; font-weight: 500; color: #9ca3af; border-bottom: 1px solid rgba(255,255,255,0.1); font-size: 11px; text-transform: none; letter-spacing: 0.02em; }
+        .license-table td { padding: 14px 16px; border-bottom: 1px solid rgba(255,255,255,0.1); color: #d1d5db; }
+        .license-table tbody tr:hover { background: rgba(255,255,255,0.05); }
+        .license-table tbody tr:last-child td { border-bottom: none; }
+        .status-badge-small { display: inline-block; padding: 4px 10px; border-radius: 8px; font-size: 11px; font-weight: 500; text-transform: none; }
+        .status-active { background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.4); }
+        .status-inactive { background: rgba(239, 68, 68, 0.2); color: #fca5a5; border: 1px solid rgba(239, 68, 68, 0.4); }
+        .status-expiring { background: rgba(245, 158, 11, 0.2); color: #fcd34d; border: 1px solid rgba(245, 158, 11, 0.4); }
+        .license-key { font-family: ui-monospace, monospace; background: #1f1f1f; color: #9ca3af; padding: 6px 10px; border-radius: 8px; font-size: 11px; word-break: break-all; user-select: all; border: 1px solid rgba(255,255,255,0.1); }
+        .action-buttons { display: flex; gap: 6px; flex-wrap: wrap; }
+        .action-btn-small { padding: 6px 12px; font-size: 12px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); color: #d1d5db; border-radius: 8px; cursor: pointer; transition: all 0.15s; font-weight: 500; }
+        .action-btn-small:hover { background: rgba(255,255,255,0.1); color: #ffffff; border-color: rgba(96,165,250,0.3); }
+        .action-btn-small.delete { background: rgba(239, 68, 68, 0.15); color: #fca5a5; border-color: rgba(239, 68, 68, 0.4); }
+        .action-btn-small.delete:hover { background: rgba(239, 68, 68, 0.25); color: #fecaca; border-color: #f87171; }
+        .alert { padding: 12px 16px; border-radius: 12px; margin-bottom: 16px; display: none; font-size: 14px; }
+        .alert.show { display: block; }
+        .alert-success { background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.4); }
+        .alert-error { background: rgba(239, 68, 68, 0.15); color: #fca5a5; border: 1px solid rgba(239, 68, 68, 0.4); }
+        .modal { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0, 0, 0, 0.7); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); z-index: 9999; align-items: center; justify-content: center; padding: 24px; box-sizing: border-box; }
+        .modal.show { display: flex; }
+        .modal-content { position: relative; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 24px; padding: 28px; max-width: 440px; width: 100%; max-height: 90vh; overflow-y: auto; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.25), 0 0 30px rgba(96,165,250,0.1); backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px); color-scheme: dark; }
+        .modal-content::before { content: ''; position: absolute; inset: 0; background: linear-gradient(to bottom right, rgba(96,165,250,0.05), transparent, rgba(6,182,212,0.05)); pointer-events: none; border-radius: 24px; }
+        .modal-content.modal-edit { max-width: 500px; }
+        .modal-header { font-size: 18px; font-weight: 600; color: #ffffff; margin-bottom: 20px; padding-right: 40px; letter-spacing: -0.01em; position: relative; }
+        .modal-close { position: absolute; top: 12px; right: 12px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); color: #9ca3af; font-size: 22px; cursor: pointer; line-height: 1; padding: 0; width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; border-radius: 10px; transition: all 0.2s; z-index: 10; }
+        .modal-close:hover { color: #ffffff; background: rgba(255,255,255,0.15); border-color: rgba(96,165,250,0.3); transform: scale(1.05); }
+        .import-export-toggle { margin-bottom: 0; }
+        .import-export-body { display: none; padding-top: 20px; margin-top: 20px; border-top: 1px solid rgba(255,255,255,0.1); }
+        .import-export-body.show { display: block; }
+        .test-key-row { display: flex; align-items: center; gap: 8px; padding: 8px 10px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); border-radius: 10px; }
+        .test-key-row .test-key-value { flex: 1; font-family: ui-monospace, monospace; font-size: 12px; color: #d1d5db; background: transparent; border: none; padding: 4px 0; min-width: 0; }
+        .test-key-row .test-key-copy { flex-shrink: 0; width: 36px; height: 36px; padding: 0; border: none; border-radius: 8px; background: rgba(234, 179, 8, 0.25); color: #eab308; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.2s; }
+        .test-key-row .test-key-copy:hover { background: rgba(234, 179, 8, 0.4); color: #fcd34d; transform: scale(1.05); }
+        .test-key-row .test-key-copy svg { width: 18px; height: 18px; }
+        .test-key-row .test-key-feedback { font-size: 11px; color: #34d399; font-weight: 500; min-width: 90px; text-align: right; opacity: 0; transition: opacity 0.2s; }
+        .test-key-row .test-key-feedback.show { opacity: 1; }
+        .copy-toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(8px); padding: 10px 20px; background: rgba(31,31,31,0.95); color: #ffffff; font-weight: 500; font-size: 13px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.1); box-shadow: 0 10px 25px rgba(0,0,0,0.3), 0 0 20px rgba(96,165,250,0.1); z-index: 10001; opacity: 0; pointer-events: none; transition: opacity 0.25s ease, transform 0.25s ease; backdrop-filter: blur(24px); }
+        .copy-toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+        .modal-content #modal-message { color: #9ca3af; margin-bottom: 20px; line-height: 1.5; position: relative; }
+        .modal-content .modal-release-message { color: #9ca3af; margin-bottom: 20px; line-height: 1.5; position: relative; }
+        .admin-table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; margin: 0 -2px 0 0; border-radius: 12px; }
+        .license-table { min-width: 720px; }
+        @media (max-width: 768px) {
+            .admin-topbar { padding: 0 24px; flex-wrap: wrap; height: auto; min-height: 64px; padding-top: 12px; padding-bottom: 12px; gap: 8px; }
+            .admin-topbar h1 { font-size: 18px; }
+            .admin-topbar-desc { font-size: 12px; }
+            .admin-main { padding: 24px 24px 48px; }
+            .stats-grid { grid-template-columns: repeat(2, 1fr); gap: 16px; }
+            .stat-number { font-size: 24px; }
+            .section { padding: 20px 24px; }
+            .modal { padding: 16px; align-items: flex-start; padding-top: max(16px, env(safe-area-inset-top)); }
+            .modal-content { max-height: calc(90vh - env(safe-area-inset-top) - env(safe-area-inset-bottom)); }
+            .copy-toast { bottom: max(24px, env(safe-area-inset-bottom)); }
+        }
+        .login-screen { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: #121212; display: flex; align-items: center; justify-content: center; z-index: 10000; }
+        .login-screen.hidden { display: none; }
+        .login-screen::before { content: ''; position: absolute; inset: 0; background: linear-gradient(to bottom right, rgba(96,165,250,0.05), rgba(6,182,212,0.03), rgba(96,165,250,0.05)); pointer-events: none; }
+        .login-box { position: relative; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 24px; padding: 32px; width: 100%; max-width: 380px; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.25), 0 0 30px rgba(96,165,250,0.1); backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px); overflow: hidden; }
+        .login-box::before { content: ''; position: absolute; inset: 0; background: linear-gradient(to bottom right, rgba(96,165,250,0.05), transparent, rgba(6,182,212,0.05)); pointer-events: none; border-radius: 24px; }
+        .login-box h2 { font-size: 18px; font-weight: 600; color: #ffffff; margin: 0 0 24px 0; text-align: center; position: relative; }
+        .login-box .form-group { margin-bottom: 16px; position: relative; }
+        .login-box .form-group label { display: block; font-size: 12px; font-weight: 500; color: #9ca3af; margin-bottom: 6px; }
+        .login-box input { width: 100%; padding: 10px 14px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; color: #ffffff; font-size: 14px; box-sizing: border-box; transition: all 0.2s; }
+        .login-box input:focus { border-color: rgba(96,165,250,0.5); outline: none; box-shadow: 0 0 0 2px rgba(96,165,250,0.2); }
+        .login-box .btn-login { width: 100%; padding: 12px; font-size: 14px; font-weight: 600; background: linear-gradient(to right, rgba(96,165,250,0.8), rgba(6,182,212,0.8)); color: #fff; border: none; border-radius: 12px; cursor: pointer; margin-top: 8px; transition: all 0.2s; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1), 0 4px 6px rgba(96,165,250,0.2); }
+        .login-box .btn-login:hover { background: linear-gradient(to right, #60a5fa, #06b6d4); box-shadow: 0 0 20px rgba(96,165,250,0.3); transform: scale(1.02); }
+        .login-box .login-error { color: #fca5a5; font-size: 13px; margin-top: 12px; display: none; position: relative; }
+        .login-box .login-error.show { display: block; }
+        .admin-panel-wrap { display: none; width: 100%; flex: 1; flex-direction: column; overflow: hidden; }
+        .admin-panel-wrap.visible { display: flex; }
+        .admin-tabs { display: flex; gap: 0; border: none; padding: 0; background: transparent; }
+        .admin-tabs .tab { padding: 10px 18px; font-size: 14px; font-weight: 500; color: #9ca3af; background: transparent; border: none; border-radius: 10px; cursor: pointer; margin: 0 2px; transition: color 0.2s, background 0.2s; }
+        .admin-tabs .tab:hover { color: #d1d5db; background: rgba(255,255,255,0.06); }
+        .admin-tabs .tab.active { color: #60a5fa; background: rgba(96,165,250,0.15); }
+        .admin-tabs .tab.hidden { display: none; }
+        .extension-download-bar { display: flex; align-items: center; flex-wrap: nowrap; gap: 20px; flex-shrink: 0; margin-bottom: 20px; padding: 12px 24px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.08), 0 0 16px rgba(96,165,250,0.08); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); }
+        .extension-download-title { font-size: 14px; font-weight: 600; color: #ffffff; margin: 0; letter-spacing: -0.01em; white-space: nowrap; }
+        .extension-download-meta-item { font-size: 13px; color: #9ca3af; white-space: nowrap; }
+        .extension-download-meta-item strong { color: #d1d5db; font-weight: 600; }
+        .extension-download-bar .extension-download-btn { flex-shrink: 0; padding: 8px 18px; font-size: 13px; font-weight: 600; background: linear-gradient(to right, rgba(96,165,250,0.8), rgba(6,182,212,0.8)); color: #fff; border: none; border-radius: 10px; cursor: pointer; transition: all 0.2s; box-shadow: 0 4px 12px rgba(0,0,0,0.1), 0 2px 4px rgba(96,165,250,0.2); }
+        .extension-download-bar .extension-download-btn:hover { background: linear-gradient(to right, #60a5fa, #06b6d4); box-shadow: 0 0 16px rgba(96,165,250,0.35); transform: scale(1.02); }
+        @media (max-width: 768px) { .extension-download-bar { flex-wrap: wrap; gap: 12px; padding: 12px 16px; } .extension-download-title { white-space: normal; } .extension-download-bar .extension-download-btn { width: 100%; } }
+    </style>
+</head>
+
+<body class="admin-page">
+    <div id="login-screen" class="login-screen">
+        <div class="login-box">
+            <h2>Entrar no painel</h2>
+            <form id="login-form">
+                <div class="form-group">
+                    <label for="login-email">E-mail</label>
+                    <input type="email" id="login-email" required autocomplete="email" placeholder="seu@email.com">
+                </div>
+                <div class="form-group">
+                    <label for="login-password">Senha</label>
+                    <input type="password" id="login-password" required autocomplete="current-password" placeholder="••••••••">
+                </div>
+                <p id="login-error" class="login-error" aria-live="polite"></p>
+                <button type="submit" class="btn btn-login" id="btn-login-submit">Entrar</button>
+            </form>
+        </div>
+    </div>
+
+    <div id="admin-panel-wrap" class="admin-panel-wrap">
+    <header class="admin-topbar">
+        <div>
+            <h1>Painel de Administração</h1>
+            <p class="admin-topbar-desc">Lovable Infinity – Gerenciamento de Licenças &middot; Criador: Mcamara</p>
+        </div>
+        <nav class="admin-tabs" aria-label="Abas do painel">
+            <button type="button" class="tab active" id="tab-licenses" data-tab="licenses">Licenças</button>
+            <button type="button" class="tab hidden" id="tab-admin" data-tab="admin">Administração</button>
+        </nav>
+        <div style="display: flex; align-items: center; gap: 12px;">
+            <a href="https://whatsapp.com/channel/0029Vb7Bk6jEVccC46JZL92T" target="_blank" rel="noopener noreferrer" class="btn btn-secondary" style="text-decoration:none;">Canal WhatsApp</a>
+            <a href="https://wa.me/224612908366" target="_blank" rel="noopener noreferrer" class="btn btn-secondary" style="text-decoration:none;">Suporte direto</a>
+            <button type="button" class="btn-cta" id="btn-open-create-modal">Criar licença</button>
+            <button type="button" class="btn btn-accent" id="btn-open-test-keys-modal">Gerar chaves de teste</button>
+            <button type="button" class="btn btn-danger" id="btn-logout">Sair</button>
+        </div>
+    </header>
+
+    <div class="extension-download-bar" id="extension-download-bar" role="region" aria-label="Download da extensão">
+        <span class="extension-download-title">Baixar extensão Lovable Infinity</span>
+        <span class="extension-download-meta-item">Versão <strong id="extension-version">—</strong></span>
+        <span class="extension-download-meta-item">Atualizado em <strong id="extension-updated-at">—</strong></span>
+        <button type="button" class="btn-cta extension-download-btn" id="btn-download-extension">Baixar extensão</button>
+    </div>
+
+    <main class="admin-main" id="main-licenses">
+        <div id="alert-main" class="alert" aria-live="polite"></div>
+        <div id="copy-toast" class="copy-toast" aria-live="polite">Copiado!</div>
+
+        <div id="semi-admin-banner" class="alert hidden" style="background: rgba(96,165,250,0.1); border: 1px solid rgba(96,165,250,0.3); color: #93c5fd; padding: 14px 18px; border-radius: 12px; margin-bottom: 16px;">
+            Seu acesso é limitado à criação de licenças. Use o botão <strong>"Criar licença"</strong> no topo da página.
+        </div>
+
+        <div class="stats-grid" id="stats-grid"></div>
+
+        <div class="section" id="licenses-table-section">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; gap: 16px; flex-wrap: wrap;">
+                <h2 style="margin: 0; font-size: 15px;">Licenças cadastradas</h2>
+                <div style="display: flex; align-items: center; gap: 10px; flex: 1; max-width: 560px; flex-wrap: wrap;">
+                    <button type="button" class="btn btn-secondary" id="btn-sort-name" style="padding: 10px 16px; font-size: 13px; white-space: nowrap;">Ordenar por nome</button>
+                    <input type="text" id="search-licenses" placeholder="Pesquisar por nome ou chave..." style="flex: 1; min-width: 180px; padding: 10px 14px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; color: #ffffff; font-size: 14px;">
+                    <button type="button" class="btn btn-secondary" id="btn-clear-search" style="padding: 10px 14px; white-space: nowrap;">Limpar</button>
+                </div>
+            </div>
+            <div class="admin-table-wrap">
+                <table class="license-table">
+                    <thead>
+                        <tr>
+                            <th>Chave</th>
+                            <th>Nome</th>
+                            <th>Telefone</th>
+                            <th>Status</th>
+                            <th>Ativada</th>
+                            <th>Expiração</th>
+                            <th>Ações</th>
+                        </tr>
+                    </thead>
+                    <tbody id="licenses-tbody"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="section" id="import-export-section">
+            <button type="button" class="btn btn-secondary import-export-toggle" id="btn-toggle-import-export" aria-expanded="false">Importar / Exportar</button>
+            <div class="import-export-body" id="import-export-body">
+                <div class="form-group">
+                    <label>Exportar Licenças (JSON)</label>
+                    <textarea id="export-textarea" readonly rows="4" style="resize: vertical;"></textarea>
+                </div>
+                <div class="button-group">
+                    <button type="button" class="btn btn-secondary" id="btn-export">Exportar</button>
+                    <button type="button" class="btn btn-secondary" id="btn-copy-export">Copiar JSON</button>
+                </div>
+                <div class="form-group" style="margin-top: 16px;">
+                    <label>Importar Licenças (JSON)</label>
+                    <textarea id="import-textarea" placeholder="Cole o JSON aqui..." rows="4" style="resize: vertical;"></textarea>
+                </div>
+                <button type="button" class="btn btn-primary" id="btn-import">Importar</button>
+            </div>
+        </div>
+    </main>
+
+    <main class="admin-main" id="main-admin" style="display: none;" aria-hidden="true">
+        <div id="alert-admin" class="alert" aria-live="polite"></div>
+
+        <!-- Listagem de usuários do painel -->
+        <div class="section">
+            <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 20px;">
+                <h2 style="margin-bottom: 0;">Semi-admins</h2>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <span id="semi-admin-slots" style="color: #94a3b8; font-size: 13px;"></span>
+                    <button type="button" class="btn btn-secondary" id="btn-refresh-panel-users">Atualizar lista</button>
+                    <button type="button" class="btn btn-secondary" id="btn-cleanup-orphaned-licenses" title="Remove licenças cujo dono (sócio) já foi excluído do painel">Limpar licenças de ex-sócios</button>
+                </div>
+            </div>
+            <div class="admin-table-wrap">
+                <table class="license-table" id="panel-users-table">
+                    <thead>
+                        <tr>
+                            <th>E-mail</th>
+                            <th>Nome</th>
+                            <th>Papel</th>
+                            <th>Licenças criadas</th>
+                            <th>Status</th>
+                            <th>Validade</th>
+                            <th>Criado em</th>
+                            <th>Ações</th>
+                        </tr>
+                    </thead>
+                    <tbody id="panel-users-tbody">
+                        <tr><td colspan="8" style="text-align: center; color: #9ca3af; padding: 24px;">Carregando...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Criar novo semi-admin -->
+        <div class="section">
+            <h2>Criar semi-admin</h2>
+            <p style="color: #94a3b8; margin-bottom: 20px;">Cadastre até 2 semi-admins. Um semi-admin só pode <strong>gerar licenças</strong> — não vê a lista de licenças, não edita, não apaga, e não gerencia outros acessos do painel.</p>
+            <div class="form-group">
+                <label for="panel-user-name">Nome do usuário</label>
+                <input type="text" id="panel-user-name" placeholder="Ex: João Silva" autocomplete="off">
+            </div>
+            <div class="form-group">
+                <label for="panel-user-email">E-mail do novo usuário</label>
+                <input type="email" id="panel-user-email" placeholder="email@exemplo.com" autocomplete="off">
+            </div>
+            <div class="form-group">
+                <label for="panel-user-password">Senha</label>
+                <div class="input-with-toggle">
+                    <input type="password" id="panel-user-password" placeholder="Mínimo 6 caracteres" autocomplete="new-password">
+                    <button type="button" class="toggle-password" data-target="panel-user-password" aria-label="Mostrar senha" title="Mostrar/ocultar senha">👁</button>
+                </div>
+            </div>
+            <div class="form-group">
+                <label for="panel-user-password-confirm">Confirmar senha</label>
+                <div class="input-with-toggle">
+                    <input type="password" id="panel-user-password-confirm" placeholder="Repita a senha" autocomplete="new-password">
+                    <button type="button" class="toggle-password" data-target="panel-user-password-confirm" aria-label="Mostrar senha" title="Mostrar/ocultar senha">👁</button>
+                </div>
+            </div>
+            <p id="panel-user-error" class="alert alert-error" style="display: none;"></p>
+            <div class="button-group">
+                <button type="button" class="btn btn-primary" id="btn-create-panel-user">Criar semi-admin</button>
+            </div>
+        </div>
+    </main>
+
+    <!-- Modal Editar usuário do painel -->
+    <div id="modal-edit-panel-user" class="modal" role="dialog" aria-labelledby="modal-edit-panel-user-title">
+        <div class="modal-content modal-edit">
+            <button type="button" class="modal-close" id="modal-edit-panel-user-close" aria-label="Fechar">×</button>
+            <h2 class="modal-header" id="modal-edit-panel-user-title">Editar usuário</h2>
+            <input type="hidden" id="edit-panel-user-uid" value="">
+            <div class="form-group">
+                <label for="edit-panel-user-email">E-mail</label>
+                <input type="email" id="edit-panel-user-email" placeholder="email@exemplo.com">
+            </div>
+            <div class="form-group">
+                <label for="edit-panel-user-name">Nome de exibição</label>
+                <input type="text" id="edit-panel-user-name" placeholder="Nome do usuário">
+            </div>
+            <div class="form-group">
+                <label for="edit-panel-user-new-password">Nova senha (deixe em branco para manter)</label>
+                <div class="input-with-toggle">
+                    <input type="password" id="edit-panel-user-new-password" placeholder="Mínimo 6 caracteres" autocomplete="new-password">
+                    <button type="button" class="toggle-password" data-target="edit-panel-user-new-password" aria-label="Mostrar senha" title="Mostrar/ocultar senha">👁</button>
+                </div>
+            </div>
+            <div class="form-group">
+                <label class="checkbox-label">
+                    <input type="checkbox" id="edit-panel-user-disabled">
+                    <span>Desativar acesso (usuário não conseguirá entrar)</span>
+                </label>
+            </div>
+            <div class="form-group">
+                <label class="checkbox-label">
+                    <input type="checkbox" id="edit-panel-user-lifetime">
+                    <span>Acesso vitalício (sem data de expiração)</span>
+                </label>
+            </div>
+            <div class="form-group" id="edit-panel-user-valid-until-group">
+                <label for="edit-panel-user-valid-until">Data de expiração do acesso</label>
+                <input type="date" id="edit-panel-user-valid-until">
+            </div>
+            <div class="button-group">
+                <button type="button" class="btn btn-primary" id="btn-edit-panel-user-submit">Salvar</button>
+                <button type="button" class="btn btn-secondary" id="btn-edit-panel-user-cancel">Cancelar</button>
+            </div>
+        </div>
+    </div>
+
+    </div>
+
+    <!-- Modal Gerar chaves de teste -->
+    <div id="modal-test-keys" class="modal" role="dialog" aria-labelledby="modal-test-keys-title">
+        <div class="modal-content">
+            <button type="button" class="modal-close" id="modal-test-keys-close" aria-label="Fechar">×</button>
+            <h2 class="modal-header" id="modal-test-keys-title">Gerar chaves de teste</h2>
+            <div class="form-group">
+                <label>Validade</label>
+                <select id="test-keys-expiry-hours">
+                    <option value="0.5">30 minutos</option>
+                    <option value="1" selected>1 hora</option>
+                    <option value="2">2 horas</option>
+                    <option value="6">6 horas</option>
+                    <option value="12">12 horas</option>
+                    <option value="24">24 horas</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Quantidade</label>
+                <input type="number" id="test-keys-quantity" value="1" min="1" max="20">
+            </div>
+            <div class="button-group">
+                <button type="button" class="btn btn-accent" id="btn-test-keys-generate">Gerar</button>
+                <button type="button" class="btn btn-danger" id="btn-test-keys-cancel">Cancelar</button>
+            </div>
+            <div id="test-keys-result" style="display: none; margin-top: 20px;">
+                <div class="form-group" style="margin-bottom: 8px;">
+                    <label>Chaves geradas (copie e envie ao cliente)</label>
+                </div>
+                <div id="test-keys-list" style="display: flex; flex-direction: column; gap: 8px; max-height: 280px; overflow-y: auto;"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal Criar licença -->
+    <div id="modal-create" class="modal" role="dialog" aria-labelledby="modal-create-title">
+        <div class="modal-content">
+            <button type="button" class="modal-close" id="modal-create-close" aria-label="Fechar">×</button>
+            <h2 class="modal-header" id="modal-create-title">Criar licença</h2>
+            <div class="form-group">
+                <label>Nome do usuário</label>
+                <input type="text" id="create-user-name" placeholder="Ex: João Silva">
+            </div>
+            <div class="form-group">
+                <label>Telefone do usuário</label>
+                <input type="tel" id="create-user-phone" placeholder="Ex: (11) 99999-9999">
+            </div>
+            <div class="form-group">
+                <label class="checkbox-label">
+                    <input type="checkbox" id="create-license-lifetime">
+                    <span>Licença vitalícia</span>
+                </label>
+            </div>
+            <div class="form-group" id="create-expiry-days-group">
+                <label>Dias de validade</label>
+                <input type="number" id="create-expiry-days" value="30" min="1" max="365">
+            </div>
+            <div class="form-group">
+                <label>Limite de usos (vazio = ilimitado)</label>
+                <input type="number" id="create-max-uses" placeholder="Ex: 100">
+            </div>
+            <div class="button-group">
+                <button type="button" class="btn btn-primary" id="btn-create-submit">Gerar licença</button>
+                <button type="button" class="btn btn-secondary" id="btn-create-cancel">Cancelar</button>
+            </div>
+            <div id="create-result" style="display: none; margin-top: 20px;">
+                <div class="form-group">
+                    <label>Licença gerada</label>
+                    <div class="license-key" id="create-new-license-key"></div>
+                </div>
+                <button type="button" class="btn btn-secondary" id="btn-create-copy">Copiar</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal Editar licença -->
+    <div id="modal-edit" class="modal" role="dialog" aria-labelledby="modal-edit-title">
+        <div class="modal-content modal-edit">
+            <button type="button" class="modal-close" id="modal-edit-close" aria-label="Fechar">×</button>
+            <h2 class="modal-header" id="modal-edit-title">Editar licença</h2>
+            <input type="hidden" id="edit-license-key" value="">
+            <div class="form-group">
+                <label>Chave (somente leitura)</label>
+                <div class="license-key" id="edit-license-key-display"></div>
+            </div>
+            <div class="form-group">
+                <label>Nome do usuário</label>
+                <input type="text" id="edit-user-name" placeholder="Nome">
+            </div>
+            <div class="form-group">
+                <label>Telefone do usuário</label>
+                <input type="tel" id="edit-user-phone" placeholder="Telefone">
+            </div>
+            <div class="form-group">
+                <label class="checkbox-label">
+                    <input type="checkbox" id="edit-active">
+                    <span>Licença ativa</span>
+                </label>
+            </div>
+            <div class="form-group">
+                <label class="checkbox-label">
+                    <input type="checkbox" id="edit-lifetime">
+                    <span>Licença vitalícia</span>
+                </label>
+            </div>
+            <div class="form-group" id="edit-expiry-group">
+                <label>Data de expiração</label>
+                <input type="date" id="edit-expiry-date">
+            </div>
+            <div class="form-group">
+                <label>Limite de usos (vazio = ilimitado)</label>
+                <input type="number" id="edit-max-uses" placeholder="Ilimitado">
+            </div>
+            <div class="button-group">
+                <button type="button" class="btn btn-primary" id="btn-edit-submit">Salvar</button>
+                <button type="button" class="btn btn-secondary" id="btn-edit-cancel">Cancelar</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal de confirmação -->
+    <div id="confirm-modal" class="modal">
+        <div class="modal-content">
+            <button type="button" class="modal-close" id="modal-close" aria-label="Fechar">×</button>
+            <div class="modal-header" id="modal-title"></div>
+            <p id="modal-message"></p>
+            <div class="button-group">
+                <button type="button" class="btn btn-primary" id="btn-confirm">Confirmar</button>
+                <button type="button" class="btn btn-secondary" id="btn-cancel">Cancelar</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal Extensão atualizada -->
+    <div id="modal-extension-release" class="modal" role="dialog" aria-labelledby="modal-extension-release-title" aria-modal="true">
+        <div class="modal-content">
+            <button type="button" class="modal-close" id="modal-extension-release-close" aria-label="Fechar">×</button>
+            <h2 class="modal-header" id="modal-extension-release-title">Extensão atualizada</h2>
+            <p id="modal-extension-release-message" class="modal-release-message">Baixe a nova versão no botão abaixo.</p>
+            <div class="button-group">
+                <button type="button" class="btn btn-primary" id="modal-extension-release-download">Baixar extensão</button>
+                <button type="button" class="btn btn-secondary" id="modal-extension-release-dismiss">Fechar</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="auth-config.js"></script>
+    <script src="license-manager.js"></script>
+    <script src="admin.js"></script>
+</body>
+
+</html>
